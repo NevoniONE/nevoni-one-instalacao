@@ -135,7 +135,9 @@ if (-not $wg) {
 
   Etapa "6. Proteção do Claude Desktop e programas"
   $comandos = @()
-  if (Test-Path $MANAGED) {
+  $removerProtecao = Test-Path $MANAGED
+  $desinstalar = @($PROGRAMAS | Where-Object { Existe $_.Comando })
+  if ($removerProtecao) {
     Write-Host "  vai remover: proteção do Claude Desktop"
     $comandos += "Remove-Item -Force '$MANAGED'"
     $comandos += "if (-not (Get-ChildItem 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue)) { Remove-Item -Force 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue }"
@@ -149,8 +151,10 @@ if (-not $wg) {
   if ($comandos.Count -gt 0) {
     if (Como-Administrador $comandos) {
       Atualizar-Path
-      if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "proteção do Claude Desktop removida" }
-      foreach ($p in $PROGRAMAS) {
+      if ($removerProtecao) {
+        if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "proteção do Claude Desktop removida" }
+      }
+      foreach ($p in $desinstalar) {
         if (Existe $p.Comando) { Falha "o $($p.Nome) continua instalado (registro em $env:PUBLIC\nevoni-one-instalacao.log)" }
         else { Ok "$($p.Nome) desinstalado" }
       }
