@@ -3,12 +3,12 @@
 # Uso: no PowerShell COMUM (não como administrador), na conta do Windows do usuário, com o usuário
 # presente para o login do GitHub:
 #
-#   irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/instalar.ps1 | iex
+#   irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/instalar.ps1 | iex
 #
 # Pode rodar de novo quantas vezes precisar: o que já estiver feito é só conferido.
 # Só a conferência final, sem mudar nada:
 #
-#   $env:NEVONI_MODO = "conferir"; irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/instalar.ps1 | iex
+#   $env:NEVONI_MODO = "conferir"; irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/instalar.ps1 | iex
 #
 # Este arquivo não contém nenhum segredo: o login e o token são do próprio usuário, feitos na hora.
 # Roteiro completo da TI: docs/ROTEIRO_INSTALACAO_USUARIO_FINAL.md, no repositório do núcleo.
@@ -41,7 +41,8 @@ function Instalar-NevoniONE {
   }
   function Repositorios {
     $nomes = gh repo list $ORG --limit 100 --json name -q ".[].name" 2>$null
-    return @($nomes | Where-Object { $_ -like "nevoni-modulo-*" })
+    # nevoni-modulo-* só enquanto existir o repositório de teste (padrão novo: nevoni-one-modulo-*).
+    return @($nomes | Where-Object { $_ -like "nevoni-one-modulo-*" -or $_ -like "nevoni-modulo-*" })
   }
   function Usuario-EhAdministrador {
     return [bool]((whoami /groups) -match "S-1-5-32-544")
@@ -228,7 +229,7 @@ function Instalar-NevoniONE {
     if ($instalou) { Ok "$r com os pacotes instalados" } else { Falha "pnpm install falhou em $r (erro 401/403: falta liberar a leitura dos pacotes para a conta $conta)" }
   }
   foreach ($antigo in @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("MyDocuments"))) {
-    Get-ChildItem $antigo -Directory -Recurse -Depth 3 -Filter "nevoni-modulo-*" -ErrorAction SilentlyContinue |
+    Get-ChildItem $antigo -Directory -Recurse -Depth 3 -Filter "nevoni*modulo-*" -ErrorAction SilentlyContinue |
       ForEach-Object { Aviso "cópia antiga fora do lugar padrão: $($_.FullName). Apague-a, com o Claude Desktop fechado." }
   }
 

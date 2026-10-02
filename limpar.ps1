@@ -3,7 +3,7 @@
 #
 # Uso: no PowerShell COMUM (não como administrador), na conta do Windows do usuário:
 #
-#   irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/limpar.ps1 | iex
+#   irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/limpar.ps1 | iex
 #
 # Antes de apagar a pasta dos módulos, o script confere se há trabalho que ainda não está no GitHub.
 

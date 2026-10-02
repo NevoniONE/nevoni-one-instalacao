@@ -8,8 +8,8 @@ No **PowerShell comum** (não como administrador), na conta do Windows do usuár
 
 | Para | Comando |
 |---|---|
-| Instalar (ou conferir e completar) | `irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/instalar.ps1 \| iex` |
-| Só conferir, sem mudar nada | `$env:NEVONI_MODO = "conferir"; irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/instalar.ps1 \| iex` |
-| Limpar tudo, inclusive os programas | `irm https://raw.githubusercontent.com/NevoniONE/nevoni-instalacao/main/limpar.ps1 \| iex` |
+| Instalar (ou conferir e completar) | `irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/instalar.ps1 \| iex` |
+| Só conferir, sem mudar nada | `$env:NEVONI_MODO = "conferir"; irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/instalar.ps1 \| iex` |
+| Limpar tudo, inclusive os programas | `irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/limpar.ps1 \| iex` |
 
 O roteiro completo da TI fica no repositório do núcleo (`docs/ROTEIRO_INSTALACAO_USUARIO_FINAL.md`).
