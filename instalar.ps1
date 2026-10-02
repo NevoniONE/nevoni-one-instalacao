@@ -33,6 +33,25 @@ function Instalar-NevoniONE {
   function Atualizar-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
   }
+  # Roda comandos numa única janela de administrador (uma senha só). Os instaladores MSI (Node,
+  # GitHub CLI) em modo silencioso não pedem a senha sozinhos: sem administrador, só recusam.
+  function Como-Administrador($comandos) {
+    $log = Join-Path $env:PUBLIC "nevoni-one-instalacao.log"
+    Remove-Item $log -ErrorAction SilentlyContinue
+    $winget = @'
+$wg = (Get-Command winget -ErrorAction SilentlyContinue).Source
+if (-not $wg) {
+  $pacote = Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
+  if ($pacote) { $wg = Join-Path $pacote.InstallLocation "winget.exe" }
+}
+'@
+    $script = "Start-Transcript -Path '$log' -Force | Out-Null`r`n$winget`r`n$($comandos -join "`r`n")`r`nStop-Transcript | Out-Null"
+    $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+    Write-Host "  o Windows vai pedir a senha de administrador; uma janela abre, trabalha e fecha sozinha..."
+    try { Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $codificado" }
+    catch { Falha "a senha de administrador não foi informada"; return $false }
+    return $true
+  }
   function Conta-GitHub {
     if (-not (Existe "gh")) { return "" }
     $login = gh api user -q .login 2>$null
@@ -118,30 +137,34 @@ function Instalar-NevoniONE {
     return
   }
 
-  Etapa "1. Programas"
+  Etapa "1. Programas e proteção do Claude Desktop"
+  $comandos = @()
   foreach ($p in $PROGRAMAS) {
-    if (Existe $p.Comando) { Ok "$($p.Nome) já instalado"; continue }
-    if (-not (Existe "winget")) { Falha "o winget não está disponível nesta máquina (instale o 'Instalador de Aplicativo' pela Microsoft Store)"; return }
-    Write-Host "  instalando $($p.Nome)... (o Windows pode pedir a senha de administrador)"
-    winget install --id $p.Id -e --silent --accept-source-agreements --accept-package-agreements
-    Atualizar-Path
-    if (Existe $p.Comando) { Ok "$($p.Nome) instalado" } else { Falha "não consegui instalar o $($p.Nome)"; return }
+    if (Existe $p.Comando) { Ok "$($p.Nome) já instalado" }
+    else {
+      Write-Host "  vai instalar: $($p.Nome)"
+      $comandos += "& `$wg install --id $($p.Id) -e --silent --accept-source-agreements --accept-package-agreements"
+    }
   }
-
-  Etapa "2. Proteção do Claude Desktop"
   $atual = if (Test-Path $MANAGED) { (Get-Content $MANAGED -Raw).Trim() } else { "" }
-  if ($atual -eq $MANAGED_CONTEUDO) { Ok "já gravada" }
+  if ($atual -eq $MANAGED_CONTEUDO) { Ok "proteção do Claude Desktop já gravada" }
   else {
-    Write-Host "  o Windows vai pedir a senha de administrador para gravar em Arquivos de Programas..."
-    $comando = "New-Item -ItemType Directory -Force 'C:\Program Files\ClaudeCode' | Out-Null; [IO.File]::WriteAllText('$MANAGED', '$MANAGED_CONTEUDO')"
-    $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($comando))
-    try {
-      Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -EncodedCommand $codificado"
-    } catch { Falha "a senha de administrador não foi informada"; return }
-    if (Test-Path $MANAGED) { Ok "gravada" } else { Falha "não consegui gravar $MANAGED"; return }
+    Write-Host "  vai gravar: proteção do Claude Desktop"
+    $comandos += "New-Item -ItemType Directory -Force 'C:\Program Files\ClaudeCode' | Out-Null"
+    $comandos += "[IO.File]::WriteAllText('$MANAGED', '$MANAGED_CONTEUDO')"
+  }
+  if ($comandos.Count -gt 0) {
+    if (-not (Como-Administrador $comandos)) { return }
+    Atualizar-Path
+    $faltou = $false
+    foreach ($p in $PROGRAMAS) {
+      if (Existe $p.Comando) { Ok "$($p.Nome) instalado" } else { Falha "não consegui instalar o $($p.Nome)"; $faltou = $true }
+    }
+    if (Test-Path $MANAGED) { Ok "proteção do Claude Desktop gravada" } else { Falha "não consegui gravar $MANAGED"; $faltou = $true }
+    if ($faltou) { Write-Host "  O registro da janela de administrador está em $env:PUBLIC\nevoni-one-instalacao.log. Mande para a one@."; return }
   }
 
-  Etapa "3. Ajustes na conta do usuário"
+  Etapa "2. Ajustes na conta do usuário"
   try { Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force -ErrorAction Stop; Ok "execução de scripts liberada para o npm" }
   catch { Aviso "não consegui ajustar a política de execução: $($_.Exception.Message)" }
   $npmGlobal = Join-Path $env:APPDATA "npm"
@@ -163,7 +186,7 @@ function Instalar-NevoniONE {
   pnpm config set update-notifier false 2>$null
   Ok "avisos de atualização do npm e do pnpm desligados (ninguém atualiza por engano)"
 
-  Etapa "4. Login do GitHub (com o usuário presente)"
+  Etapa "3. Login do GitHub (com o usuário presente)"
   $conta = Conta-GitHub
   if ($conta -eq $ORG) {
     Falha "o GitHub está logado com a conta guardiã ($ORG). Ela nunca é usada na máquina do usuário. Saindo dela..."
@@ -189,7 +212,7 @@ function Instalar-NevoniONE {
   gh auth setup-git
   Ok "GitHub logado como $conta, e o Git usa esse login (sem a janela de escolher conta)"
 
-  Etapa "5. Identificação nos envios"
+  Etapa "4. Identificação nos envios"
   $id = "$(gh api user -q .id)".Trim()
   $email = "$id+$conta@users.noreply.github.com"
   $nome = "$(git config --global user.name 2>$null)".Trim()
@@ -203,13 +226,13 @@ function Instalar-NevoniONE {
   Write-Host "  (no GitHub do usuário, Settings > Emails, as opções 'Keep my email addresses private' e"
   Write-Host "   'Block command line pushes that expose my email' devem estar marcadas: passo 1 do roteiro)"
 
-  Etapa "6. Token de leitura dos pacotes da empresa"
+  Etapa "5. Token de leitura dos pacotes da empresa"
   $token = "$(gh auth token)".Trim()
   [Environment]::SetEnvironmentVariable("NODE_AUTH_TOKEN", $token, "User")
   $env:NODE_AUTH_TOKEN = $token
   Ok "gravado na conta do usuário (é o mesmo token do login do GitHub e não expira)"
 
-  Etapa "7. Módulos do usuário"
+  Etapa "6. Módulos do usuário"
   New-Item -ItemType Directory -Force $PASTA | Out-Null
   $repos = Repositorios
   if ($repos.Count -eq 0) { Falha "a conta $conta não tem acesso a nenhum repositório de módulo. Confira o convite (passo 2 do roteiro)."; return }

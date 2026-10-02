@@ -5,6 +5,7 @@
 #
 #   irm https://raw.githubusercontent.com/NevoniONE/nevoni-one-instalacao/main/limpar.ps1 | iex
 #
+# Pode rodar de novo quantas vezes precisar: o que já estiver removido é só conferido.
 # Antes de apagar a pasta dos módulos, o script confere se há trabalho que ainda não está no GitHub.
 
 function Limpar-NevoniONE {
@@ -23,6 +24,25 @@ function Limpar-NevoniONE {
   function Existe($comando) { [bool](Get-Command $comando -ErrorAction SilentlyContinue) }
   function Atualizar-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+  }
+  # Roda comandos numa única janela de administrador (uma senha só). Os desinstaladores MSI (Node,
+  # GitHub CLI) em modo silencioso não pedem a senha sozinhos: sem administrador, só recusam.
+  function Como-Administrador($comandos) {
+    $log = Join-Path $env:PUBLIC "nevoni-one-instalacao.log"
+    Remove-Item $log -ErrorAction SilentlyContinue
+    $winget = @'
+$wg = (Get-Command winget -ErrorAction SilentlyContinue).Source
+if (-not $wg) {
+  $pacote = Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
+  if ($pacote) { $wg = Join-Path $pacote.InstallLocation "winget.exe" }
+}
+'@
+    $script = "Start-Transcript -Path '$log' -Force | Out-Null`r`n$winget`r`n$($comandos -join "`r`n")`r`nStop-Transcript | Out-Null"
+    $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+    Write-Host "  o Windows vai pedir a senha de administrador; uma janela abre, trabalha e fecha sozinha..."
+    try { Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $codificado" }
+    catch { Falha "a senha de administrador não foi informada"; return $false }
+    return $true
   }
 
   Write-Host "Limpeza da máquina do usuário final do Nevoni ONE" -ForegroundColor Cyan
@@ -75,20 +95,25 @@ function Limpar-NevoniONE {
   foreach ($alvo in $alvos) { cmdkey "/delete:$alvo" | Out-Null; Ok "conta guardada no Windows removida ($alvo)" }
   [Environment]::SetEnvironmentVariable("NODE_AUTH_TOKEN", $null, "User")
   $env:NODE_AUTH_TOKEN = $null
-  Ok "token dos pacotes removido"
   Remove-Item -Recurse -Force (Join-Path $env:APPDATA "GitHub CLI") -ErrorAction SilentlyContinue
+  Ok "sem login do GitHub e sem token dos pacotes"
 
   Etapa "3. Configurações do Git"
   if (Existe "git") {
     foreach ($chave in @("user.name", "user.email", "core.autocrlf", "core.longpaths")) { git config --global --unset-all $chave 2>$null }
     git config --global --remove-section credential.https://github.com 2>$null
     Ok "configurações removidas"
-  }
+  } else { Ok "o Git já não está instalado" }
 
   Etapa "4. Pasta dos módulos"
   if (Test-Path $PASTA) {
-    try { Remove-Item -Recurse -Force $PASTA -ErrorAction Stop; Ok "pasta apagada" }
-    catch { Falha "a pasta está em uso. Feche o Claude Desktop, o Explorador de Arquivos e os terminais nessa pasta, e rode de novo." }
+    $apagou = $false
+    for ($tentativa = 1; $tentativa -le 3 -and -not $apagou; $tentativa++) {
+      try { Remove-Item -Recurse -Force $PASTA -ErrorAction Stop; $apagou = $true }
+      catch { if ($tentativa -lt 3) { Start-Sleep -Seconds 5 } }
+    }
+    if ($apagou) { Ok "pasta apagada" }
+    else { Falha "a pasta está em uso. Feche o Claude Desktop, o Explorador de Arquivos e os terminais nessa pasta, e rode de novo." }
   } else { Ok "pasta já não existia" }
 
   Etapa "5. pnpm e npm"
@@ -108,23 +133,28 @@ function Limpar-NevoniONE {
   try { Set-ExecutionPolicy -Scope CurrentUser Undefined -Force -ErrorAction Stop } catch { }
   Ok "pnpm e configurações do npm removidos"
 
-  Etapa "6. Proteção do Claude Desktop"
+  Etapa "6. Proteção do Claude Desktop e programas"
+  $comandos = @()
   if (Test-Path $MANAGED) {
-    Write-Host "  o Windows vai pedir a senha de administrador..."
-    $comando = "Remove-Item -Force '$MANAGED'; if (-not (Get-ChildItem 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue)) { Remove-Item -Force 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue }"
-    $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($comando))
-    try { Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -EncodedCommand $codificado" } catch { }
-    if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "removida" }
-  } else { Ok "já não existia" }
-
-  Etapa "7. Programas"
+    Write-Host "  vai remover: proteção do Claude Desktop"
+    $comandos += "Remove-Item -Force '$MANAGED'"
+    $comandos += "if (-not (Get-ChildItem 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue)) { Remove-Item -Force 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue }"
+  } else { Ok "proteção do Claude Desktop já não existia" }
   foreach ($p in $PROGRAMAS) {
-    if (-not (Existe $p.Comando)) { Ok "$($p.Nome) já não está instalado"; continue }
-    if (-not (Existe "winget")) { Falha "o winget não está disponível para desinstalar o $($p.Nome)"; continue }
-    Write-Host "  desinstalando $($p.Nome)... (o Windows pode pedir a senha de administrador)"
-    winget uninstall --id $p.Id -e --silent --accept-source-agreements | Out-Null
-    Atualizar-Path
-    if (Existe $p.Comando) { Falha "o $($p.Nome) continua instalado" } else { Ok "$($p.Nome) desinstalado" }
+    if (Existe $p.Comando) {
+      Write-Host "  vai desinstalar: $($p.Nome)"
+      $comandos += "& `$wg uninstall --id $($p.Id) -e --silent --accept-source-agreements"
+    } else { Ok "$($p.Nome) já não está instalado" }
+  }
+  if ($comandos.Count -gt 0) {
+    if (Como-Administrador $comandos) {
+      Atualizar-Path
+      if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "proteção do Claude Desktop removida" }
+      foreach ($p in $PROGRAMAS) {
+        if (Existe $p.Comando) { Falha "o $($p.Nome) continua instalado (registro em $env:PUBLIC\nevoni-one-instalacao.log)" }
+        else { Ok "$($p.Nome) desinstalado" }
+      }
+    }
   }
 
   Write-Host ""
