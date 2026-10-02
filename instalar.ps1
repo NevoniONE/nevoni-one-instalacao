@@ -41,8 +41,7 @@ function Instalar-NevoniONE {
   }
   function Repositorios {
     $nomes = gh repo list $ORG --limit 100 --json name -q ".[].name" 2>$null
-    # nevoni-modulo-* só enquanto existir o repositório de teste (padrão novo: nevoni-one-modulo-*).
-    return @($nomes | Where-Object { $_ -like "nevoni-one-modulo-*" -or $_ -like "nevoni-modulo-*" })
+    return @($nomes | Where-Object { $_ -like "nevoni-one-modulo-*" })
   }
   function Usuario-EhAdministrador {
     return [bool]((whoami /groups) -match "S-1-5-32-544")
