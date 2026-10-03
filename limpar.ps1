@@ -68,7 +68,9 @@ function Instalar-Git {
   if ($p.ExitCode -ne 0) { throw "instalador do Git terminou com código $($p.ExitCode)" }
 }
 function Instalar-Node {
-  $versao = (Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing | Where-Object { $_.lts } | Select-Object -First 1).version
+  # No PowerShell 5.1, a lista vinda do Invoke-RestMethod só é percorrida item a item depois de guardada numa variável.
+  $lista = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing
+  $versao = ($lista | Where-Object { $_.lts } | Select-Object -First 1).version
   $nome = "node-$versao-x64.msi"
   $somas = (Invoke-WebRequest -Uri "https://nodejs.org/dist/$versao/SHASUMS256.txt" -UseBasicParsing).Content
   $sha = ($somas -split "`n" | Where-Object { $_.Trim().EndsWith($nome) } | Select-Object -First 1) -split "\s+" | Select-Object -First 1
@@ -235,7 +237,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
 
   Write-Host ""
   if ($estado.falhas -eq 0) { Write-Host "LIMPEZA CONCLUÍDA." -ForegroundColor Green }
-  else { Write-Host "LIMPEZA INCOMPLETA: $($estado.falhas) item(ns) com FALHA acima. Rode de novo; se continuar, mande o print para a one@." -ForegroundColor Red }
+  else { Write-Host "LIMPEZA INCOMPLETA: $($estado.falhas) item(ns) com FALHA acima. Rode de novo; se continuar, mande o print para a TI." -ForegroundColor Red }
   Write-Host "No Claude Desktop, a pasta do módulo some da lista ao ser aberta; se a máquina deixar de ser do usuário, saia da conta dele no app."
 }
 

@@ -74,7 +74,9 @@ function Instalar-Git {
   if ($p.ExitCode -ne 0) { throw "instalador do Git terminou com código $($p.ExitCode)" }
 }
 function Instalar-Node {
-  $versao = (Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing | Where-Object { $_.lts } | Select-Object -First 1).version
+  # No PowerShell 5.1, a lista vinda do Invoke-RestMethod só é percorrida item a item depois de guardada numa variável.
+  $lista = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing
+  $versao = ($lista | Where-Object { $_.lts } | Select-Object -First 1).version
   $nome = "node-$versao-x64.msi"
   $somas = (Invoke-WebRequest -Uri "https://nodejs.org/dist/$versao/SHASUMS256.txt" -UseBasicParsing).Content
   $sha = ($somas -split "`n" | Where-Object { $_.Trim().EndsWith($nome) } | Select-Object -First 1) -split "\s+" | Select-Object -First 1
@@ -178,7 +180,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
       Write-Host "  4. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
     } else {
       Write-Host "A MÁQUINA AINDA NÃO ESTÁ PRONTA: $falhas item(ns) com FALHA acima." -ForegroundColor Red
-      Write-Host "Rode o script de novo. Se a falha continuar, mande o print para a one@."
+      Write-Host "Rode o script de novo. Se a falha continuar, mande o print para a TI."
     }
   }
 
@@ -216,7 +218,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
     }
     $gravado = if (Test-Path $MANAGED) { (Get-Content $MANAGED -Raw).Trim() } else { "" }
     if ($gravado -eq $MANAGED_CONTEUDO) { Ok "proteção do Claude Desktop gravada" } else { Falha "não consegui gravar $MANAGED com o conteúdo certo"; $faltou = $true }
-    if ($faltou) { Write-Host "  O registro da janela de administrador está em $env:PUBLIC\nevoni-one-instalacao.log. Mande para a one@."; return }
+    if ($faltou) { Write-Host "  O registro da janela de administrador está em $env:PUBLIC\nevoni-one-instalacao.log. Mande para a TI."; return }
   }
 
   Etapa "2. Ajustes na conta do usuário"
