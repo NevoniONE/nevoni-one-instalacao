@@ -122,10 +122,16 @@ function Tentar($rotulo, [scriptblock]$acao) {
   function Usuario-EhAdministrador {
     return [bool]((whoami /groups) -match "S-1-5-32-544")
   }
+  # Claude Desktop: pacote MSIX oficial da Anthropic, instalado na conta do usuário (sem administrador).
+  # Fonte: support.claude.com, "Deploy Claude Desktop for Windows".
+  function Claude-Pacote {
+    Get-AppxPackage -Name "Claude" -ErrorAction SilentlyContinue | Where-Object { $_.Publisher -like "*Anthropic*" } | Select-Object -First 1
+  }
 
-  function Conferir {
+  function Conferir($guiar) {
     Etapa "Conferência final"
     $falhas = 0
+    if (Claude-Pacote) { Ok "Claude Desktop instalado" } else { Falha "Claude Desktop não está instalado"; $falhas++ }
     foreach ($p in $PROGRAMAS) {
       if (Existe $p.Comando) { Ok "$($p.Nome) instalado" } else { Falha "$($p.Nome) não está instalado"; $falhas++ }
     }
@@ -171,13 +177,27 @@ function Tentar($rotulo, [scriptblock]$acao) {
     Write-Host ""
     if ($falhas -eq 0) {
       Write-Host "MÁQUINA PRONTA." -ForegroundColor Green
-      Write-Host ""
-      Write-Host "Falta só o que é feito na tela do Claude Desktop (roteiro, passos 4 e 5):"
-      Write-Host "  1. Feche o Claude Desktop por completo (ícone perto do relógio, botão direito, Sair) e abra de novo."
-      Write-Host "  2. Aba Code, escolher pasta, e cole na barra de endereço o caminho de cada módulo:"
-      foreach ($r in $repos) { Write-Host "       %LOCALAPPDATA%\NevoniONE\$r" }
-      Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
-      Write-Host "  4. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
+      if ($guiar) {
+        # O que só existe na tela do aplicativo: o script abre o Claude Desktop e mostra o que fazer.
+        # (Login, confiança na pasta e modo são escolhas do aplicativo, sem configuração oficial para automatizar.)
+        while (Get-Process -Name "Claude" -ErrorAction SilentlyContinue) {
+          Read-Host "  O Claude Desktop está aberto. Feche-o por completo (ícone perto do relógio, botão direito, Sair) e pressione Enter"
+          Start-Sleep -Seconds 3
+        }
+        $primeiro = Join-Path $PASTA $repos[0]
+        try { Set-Clipboard -Value $primeiro } catch { }
+        $pacote = Claude-Pacote
+        Start-Process "shell:AppsFolder\$($pacote.PackageFamilyName)!Claude"
+        Write-Host ""
+        Write-Host "O Claude Desktop foi aberto. Com o usuário presente:"
+        Write-Host "  1. Entrar com a conta @nevoni.com.br do usuário."
+        Write-Host "  2. Aba Code, botão de escolher pasta (ao lado de 'Local'), colar na barra de endereço (Ctrl+V)"
+        Write-Host "     o caminho do módulo, que já está copiado, e clicar em 'Selecionar pasta':"
+        foreach ($r in $repos) { Write-Host "       $(Join-Path $PASTA $r)" }
+        Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
+        Write-Host "  4. Se perguntar onde abrir os links: 'Abrir no Google Chrome'."
+        Write-Host "  5. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
+      }
     } else {
       Write-Host "A MÁQUINA AINDA NÃO ESTÁ PRONTA: $falhas item(ns) com FALHA acima." -ForegroundColor Red
       Write-Host "Rode o script de novo. Se a falha continuar, mande o print para a TI."
@@ -186,7 +206,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
 
   Write-Host "Instalação da máquina do usuário final do Nevoni ONE" -ForegroundColor Cyan
 
-  if ($env:NEVONI_MODO -eq "conferir") { $env:NEVONI_MODO = $null; Conferir; return }
+  if ($env:NEVONI_MODO -eq "conferir") { $env:NEVONI_MODO = $null; Conferir $false; return }
 
   $elevado = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   if ($elevado) {
@@ -319,7 +339,32 @@ function Tentar($rotulo, [scriptblock]$acao) {
       ForEach-Object { Aviso "cópia antiga fora do lugar padrão: $($_.FullName). Apague-a, com o Claude Desktop fechado." }
   }
 
-  Conferir
+  Etapa "7. Claude Desktop"
+  if (Claude-Pacote) { Ok "Claude Desktop já instalado" }
+  else {
+    if (Test-Path (Join-Path $env:LOCALAPPDATA "AnthropicClaude")) {
+      Aviso "existe uma versão antiga do Claude Desktop (instalador .exe). Desinstale-a em Configurações > Aplicativos antes de usar a nova."
+    }
+    $arquitetura = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+    $pastaTemp = Join-Path $env:TEMP "nevoni-one-instalacao"
+    New-Item -ItemType Directory -Force $pastaTemp | Out-Null
+    $msix = Join-Path $pastaTemp "Claude.msix"
+    Write-Host "  baixando o Claude Desktop (cerca de 300 MB)..."
+    try {
+      $ProgressPreference = "SilentlyContinue"
+      Invoke-WebRequest -Uri "https://claude.ai/api/desktop/win32/$arquitetura/msix/latest/redirect" -OutFile $msix -UseBasicParsing
+      # Integridade: assinatura digital válida, emitida para a Anthropic.
+      $assinatura = Get-AuthenticodeSignature $msix
+      if ($assinatura.Status -ne "Valid" -or $assinatura.SignerCertificate.Subject -notlike '*O="Anthropic, PBC"*') {
+        throw "a assinatura digital do instalador não é da Anthropic"
+      }
+      Add-AppxPackage -Path $msix -ErrorAction Stop
+    } catch { Falha "não consegui instalar o Claude Desktop: $($_.Exception.Message)" }
+    Remove-Item $msix -ErrorAction SilentlyContinue
+    if (Claude-Pacote) { Ok "Claude Desktop instalado (assinatura da Anthropic conferida)" }
+  }
+
+  Conferir $true
 }
 
 Instalar-NevoniONE

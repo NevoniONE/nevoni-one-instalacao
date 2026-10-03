@@ -115,8 +115,8 @@ function Tentar($rotulo, [scriptblock]$acao) {
   Write-Host "  - a pasta dos módulos ($PASTA);"
   Write-Host "  - o pnpm e as configurações do npm;"
   Write-Host "  - a proteção do Claude Desktop;"
-  Write-Host "  - os programas Git, Node.js e GitHub CLI."
-  Write-Host "O Claude Desktop não é desinstalado. Se a máquina deixar de ser do usuário, saia da conta dele no app."
+  Write-Host "  - os programas Git, Node.js e GitHub CLI;"
+  Write-Host "  - o Claude Desktop e os dados dele nesta conta (login, conversas e configurações)."
   if ((Read-Host "Para confirmar, digite LIMPAR") -ne "LIMPAR") { Write-Host "Nada foi feito."; return }
 
   # Confere de verdade: com o Claude Desktop aberto, a pasta dos módulos fica em uso (achado da T1).
@@ -235,10 +235,28 @@ function Tentar($rotulo, [scriptblock]$acao) {
     }
   }
 
+  Etapa "7. Claude Desktop"
+  $pacote = Get-AppxPackage -Name "Claude" -ErrorAction SilentlyContinue | Where-Object { $_.Publisher -like "*Anthropic*" }
+  if ($pacote) {
+    $erroClaude = ""
+    try { $pacote | Remove-AppxPackage -ErrorAction Stop } catch { $erroClaude = $_.Exception.Message }
+    if (Get-AppxPackage -Name "Claude" -ErrorAction SilentlyContinue | Where-Object { $_.Publisher -like "*Anthropic*" }) {
+      Falha "não consegui desinstalar o Claude Desktop. Erro: $erroClaude"
+    } else { Ok "Claude Desktop desinstalado (o login dele nesta conta saiu junto)" }
+  } else { Ok "Claude Desktop já não está instalado" }
+  # Dados do Claude Code (aba Code) nesta conta: conversas, pastas confiadas e configurações.
+  $dados = @((Join-Path $env:USERPROFILE ".claude"), (Join-Path $env:USERPROFILE ".claude.json"), (Join-Path $env:LOCALAPPDATA "Claude"))
+  foreach ($d in $dados) {
+    if (-not (Test-Path $d)) { continue }
+    Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
+    if (Test-Path $d) { cmd.exe /c "rd /s /q `"\\?\$d`"" 2>$null | Out-Null }
+  }
+  $sobrou = @($dados | Where-Object { Test-Path $_ })
+  if ($sobrou.Count -eq 0) { Ok "dados do Claude nesta conta removidos" } else { Falha "não consegui apagar: $($sobrou -join ', ')" }
+
   Write-Host ""
   if ($estado.falhas -eq 0) { Write-Host "LIMPEZA CONCLUÍDA." -ForegroundColor Green }
   else { Write-Host "LIMPEZA INCOMPLETA: $($estado.falhas) item(ns) com FALHA acima. Rode de novo; se continuar, mande o print para a TI." -ForegroundColor Red }
-  Write-Host "No Claude Desktop, a pasta do módulo some da lista ao ser aberta; se a máquina deixar de ser do usuário, saia da conta dele no app."
 }
 
 Limpar-NevoniONE
