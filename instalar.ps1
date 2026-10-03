@@ -192,7 +192,8 @@ function Tentar($rotulo, [scriptblock]$acao) {
         Write-Host "O Claude Desktop foi aberto. Com o usuário presente:"
         Write-Host "  1. Entrar com a conta @nevoni.com.br do usuário."
         Write-Host "  2. Aba Code, botão de escolher pasta (ao lado de 'Local'), colar na barra de endereço (Ctrl+V)"
-        Write-Host "     o caminho do módulo, que já está copiado, e clicar em 'Selecionar pasta':"
+        Write-Host "     o caminho do módulo, que já está copiado, e clicar em 'Selecionar pasta'."
+        Write-Host "     Se o Ctrl+V não colar o caminho (por exemplo, porque outra coisa foi copiada depois), copie-o daqui:"
         foreach ($r in $repos) { Write-Host "       $(Join-Path $PASTA $r)" }
         Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
         Write-Host "  4. Se perguntar onde abrir os links: 'Abrir no Google Chrome'."
