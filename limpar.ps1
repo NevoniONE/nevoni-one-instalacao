@@ -12,9 +12,9 @@ function Limpar-NevoniONE {
   $PASTA = Join-Path $env:LOCALAPPDATA "NevoniONE"
   $MANAGED = "C:\Program Files\ClaudeCode\managed-settings.json"
   $PROGRAMAS = @(
-    @{ Id = "GitHub.cli"; Comando = "gh"; Nome = "GitHub CLI" },
-    @{ Id = "OpenJS.NodeJS.LTS"; Comando = "node"; Nome = "Node.js" },
-    @{ Id = "Git.Git"; Comando = "git"; Nome = "Git" }
+    @{ Comando = "gh"; Nome = "GitHub CLI"; Padrao = "^GitHub CLI" },
+    @{ Comando = "node"; Nome = "Node.js"; Padrao = "^Node\.js" },
+    @{ Comando = "git"; Nome = "Git"; Padrao = "^Git$|^Git version" }
   )
 
   function Etapa($texto) { Write-Host ""; Write-Host "== $texto ==" -ForegroundColor Cyan }
@@ -30,14 +30,69 @@ function Limpar-NevoniONE {
   function Como-Administrador($comandos) {
     $log = Join-Path $env:PUBLIC "nevoni-one-instalacao.log"
     Remove-Item $log -ErrorAction SilentlyContinue
-    $winget = @'
-$wg = (Get-Command winget -ErrorAction SilentlyContinue).Source
-if (-not $wg) {
-  $pacote = Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
-  if ($pacote) { $wg = Join-Path $pacote.InstallLocation "winget.exe" }
+    # Funções da janela de administrador. Sem winget: numa janela elevada por outra conta (a
+    # administradora), o Windows nega a execução do winget, que é um app da Loja por usuário
+    # (achado da simulação T1). Os instaladores vêm direto das fontes oficiais, com o hash
+    # SHA-256 conferido; a desinstalação usa o registro do Windows ("Adicionar ou remover programas").
+    $funcoesAdmin = @'
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$pastaTemp = Join-Path $env:TEMP "nevoni-one-instalacao"
+New-Item -ItemType Directory -Force $pastaTemp | Out-Null
+function Baixar($url, $nome, $sha256) {
+  $destino = Join-Path $pastaTemp $nome
+  Write-Host "baixando $url"
+  Invoke-WebRequest -Uri $url -OutFile $destino -UseBasicParsing
+  if (-not $sha256) { throw "sem hash para conferir $nome" }
+  if ((Get-FileHash $destino -Algorithm SHA256).Hash.ToLower() -ne $sha256.ToLower()) { throw "o hash de $nome não confere" }
+  Write-Host "hash conferido: $nome"
+  return $destino
+}
+function Instalador-GitHub($repo, $padrao) {
+  $versao = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing -Headers @{ "User-Agent" = "nevoni-one-instalacao" }
+  $item = $versao.assets | Where-Object { $_.name -match $padrao } | Select-Object -First 1
+  if (-not $item) { throw "não achei o instalador em $repo" }
+  $sha = if ("$($item.digest)" -like "sha256:*") { "$($item.digest)".Substring(7) } else { $null }
+  return Baixar $item.browser_download_url $item.name $sha
+}
+function Rodar-Msi($arquivo, $acao) {
+  $p = Start-Process msiexec.exe -ArgumentList $acao, "`"$arquivo`"", "/qn", "/norestart" -Wait -PassThru
+  if ($p.ExitCode -notin 0, 3010) { throw "msiexec terminou com código $($p.ExitCode)" }
+}
+function Instalar-Git {
+  $f = Instalador-GitHub "git-for-windows/git" '^Git-[\d.]+-64-bit\.exe$'
+  $p = Start-Process $f -ArgumentList "/VERYSILENT", "/NORESTART", "/SP-", "/SUPPRESSMSGBOXES" -Wait -PassThru
+  if ($p.ExitCode -ne 0) { throw "instalador do Git terminou com código $($p.ExitCode)" }
+}
+function Instalar-Node {
+  $versao = (Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing | Where-Object { $_.lts } | Select-Object -First 1).version
+  $nome = "node-$versao-x64.msi"
+  $somas = (Invoke-WebRequest -Uri "https://nodejs.org/dist/$versao/SHASUMS256.txt" -UseBasicParsing).Content
+  $sha = ($somas -split "`n" | Where-Object { $_.Trim().EndsWith($nome) } | Select-Object -First 1) -split "\s+" | Select-Object -First 1
+  Rodar-Msi (Baixar "https://nodejs.org/dist/$versao/$nome" $nome $sha) "/i"
+}
+function Instalar-GhCli {
+  Rodar-Msi (Instalador-GitHub "cli/cli" '^gh_[\d.]+_windows_amd64\.msi$') "/i"
+}
+function Desinstalar($padrao) {
+  $chaves = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+  $itens = Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $padrao }
+  foreach ($i in $itens) {
+    Write-Host "desinstalando $($i.DisplayName)"
+    if ($i.WindowsInstaller -eq 1) {
+      $p = Start-Process msiexec.exe -ArgumentList "/x", $i.PSChildName, "/qn", "/norestart" -Wait -PassThru
+    } else {
+      $p = Start-Process $i.UninstallString.Trim('"') -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES" -Wait -PassThru
+    }
+    Write-Host "  código de saída: $($p.ExitCode)"
+  }
+}
+function Tentar($rotulo, [scriptblock]$acao) {
+  try { & $acao; Write-Host "OK: $rotulo" } catch { Write-Host "ERRO em ${rotulo}: $($_.Exception.Message)" }
 }
 '@
-    $script = "Start-Transcript -Path '$log' -Force | Out-Null`r`n$winget`r`n$($comandos -join "`r`n")`r`nStop-Transcript | Out-Null"
+    $script = "Start-Transcript -Path '$log' -Force | Out-Null`r`n$funcoesAdmin`r`n$($comandos -join "`r`n")`r`nStop-Transcript | Out-Null"
     $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
     Write-Host "  o Windows vai pedir a senha de administrador; uma janela abre, trabalha e fecha sozinha..."
     try { Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $codificado" }
@@ -60,8 +115,10 @@ if (-not $wg) {
   Write-Host "O Claude Desktop não é desinstalado. Se a máquina deixar de ser do usuário, saia da conta dele no app."
   if ((Read-Host "Para confirmar, digite LIMPAR") -ne "LIMPAR") { Write-Host "Nada foi feito."; return }
 
-  if (Get-Process -Name "Claude" -ErrorAction SilentlyContinue) {
-    Read-Host "Feche o Claude Desktop por completo (ícone perto do relógio, botão direito, Sair) e pressione Enter"
+  # Confere de verdade: com o Claude Desktop aberto, a pasta dos módulos fica em uso (achado da T1).
+  while (Get-Process -Name "Claude" -ErrorAction SilentlyContinue) {
+    Read-Host "O Claude Desktop está aberto. Feche-o por completo (ícone perto do relógio, botão direito, Sair) e pressione Enter"
+    Start-Sleep -Seconds 3
   }
 
   Etapa "1. Trabalho que ainda não está no GitHub"
@@ -145,7 +202,7 @@ if (-not $wg) {
   foreach ($p in $PROGRAMAS) {
     if (Existe $p.Comando) {
       Write-Host "  vai desinstalar: $($p.Nome)"
-      $comandos += "& `$wg uninstall --id $($p.Id) -e --silent --accept-source-agreements"
+      $comandos += "Tentar '$($p.Nome)' { Desinstalar '$($p.Padrao)' }"
     } else { Ok "$($p.Nome) já não está instalado" }
   }
   if ($comandos.Count -gt 0) {
