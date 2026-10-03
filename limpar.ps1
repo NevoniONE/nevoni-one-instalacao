@@ -164,13 +164,21 @@ function Tentar($rotulo, [scriptblock]$acao) {
 
   Etapa "4. Pasta dos módulos"
   if (Test-Path $PASTA) {
-    $apagou = $false
-    for ($tentativa = 1; $tentativa -le 3 -and -not $apagou; $tentativa++) {
-      try { Remove-Item -Recurse -Force $PASTA -ErrorAction Stop; $apagou = $true }
-      catch { if ($tentativa -lt 3) { Start-Sleep -Seconds 5 } }
+    # O node_modules tem caminhos maiores que o limite antigo do Windows (260 caracteres), e o
+    # Remove-Item do PowerShell 5.1 não apaga esses arquivos (achado da T1). O "rd" com o prefixo
+    # \\?\ aceita caminhos longos.
+    $erro = ""
+    try { Remove-Item -Recurse -Force $PASTA -ErrorAction Stop } catch { $erro = $_.Exception.Message }
+    if (Test-Path $PASTA) { cmd.exe /c "rd /s /q `"\\?\$PASTA`"" 2>$null | Out-Null }
+    if (Test-Path $PASTA) {
+      Start-Sleep -Seconds 5
+      cmd.exe /c "rd /s /q `"\\?\$PASTA`"" 2>$null | Out-Null
     }
-    if ($apagou) { Ok "pasta apagada" }
-    else { Falha "a pasta está em uso. Feche o Claude Desktop, o Explorador de Arquivos e os terminais nessa pasta, e rode de novo." }
+    if (-not (Test-Path $PASTA)) { Ok "pasta apagada" }
+    else {
+      Falha "não consegui apagar $PASTA. Erro: $erro"
+      Write-Host "  Se for arquivo em uso: feche o Claude Desktop, o Explorador de Arquivos e os terminais nessa pasta, e rode de novo."
+    }
   } else { Ok "pasta já não existia" }
 
   Etapa "5. pnpm e npm"
