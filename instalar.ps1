@@ -170,12 +170,12 @@ function Tentar($rotulo, [scriptblock]$acao) {
     if ($falhas -eq 0) {
       Write-Host "MÁQUINA PRONTA." -ForegroundColor Green
       Write-Host ""
-      Write-Host "Falta só o que é feito na tela do Claude Desktop (roteiro, passos 7 e 9):"
+      Write-Host "Falta só o que é feito na tela do Claude Desktop (roteiro, passos 4 e 5):"
       Write-Host "  1. Feche o Claude Desktop por completo (ícone perto do relógio, botão direito, Sair) e abra de novo."
       Write-Host "  2. Aba Code, escolher pasta, e cole na barra de endereço o caminho de cada módulo:"
       foreach ($r in $repos) { Write-Host "       %LOCALAPPDATA%\NevoniONE\$r" }
       Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
-      Write-Host "  4. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 9."
+      Write-Host "  4. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
     } else {
       Write-Host "A MÁQUINA AINDA NÃO ESTÁ PRONTA: $falhas item(ns) com FALHA acima." -ForegroundColor Red
       Write-Host "Rode o script de novo. Se a falha continuar, mande o print para a one@."
@@ -205,8 +205,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
   if ($atual -eq $MANAGED_CONTEUDO) { Ok "proteção do Claude Desktop já gravada" }
   else {
     Write-Host "  vai gravar: proteção do Claude Desktop"
-    $comandos += "New-Item -ItemType Directory -Force 'C:\Program Files\ClaudeCode' | Out-Null"
-    $comandos += "[IO.File]::WriteAllText('$MANAGED', '$MANAGED_CONTEUDO')"
+    $comandos += "Tentar 'proteção do Claude Desktop' { New-Item -ItemType Directory -Force 'C:\Program Files\ClaudeCode' | Out-Null; [IO.File]::WriteAllText('$MANAGED', '$MANAGED_CONTEUDO') }"
   }
   if ($comandos.Count -gt 0) {
     if (-not (Como-Administrador $comandos)) { return }
@@ -215,7 +214,8 @@ function Tentar($rotulo, [scriptblock]$acao) {
     foreach ($p in $PROGRAMAS) {
       if (Existe $p.Comando) { Ok "$($p.Nome) instalado" } else { Falha "não consegui instalar o $($p.Nome)"; $faltou = $true }
     }
-    if (Test-Path $MANAGED) { Ok "proteção do Claude Desktop gravada" } else { Falha "não consegui gravar $MANAGED"; $faltou = $true }
+    $gravado = if (Test-Path $MANAGED) { (Get-Content $MANAGED -Raw).Trim() } else { "" }
+    if ($gravado -eq $MANAGED_CONTEUDO) { Ok "proteção do Claude Desktop gravada" } else { Falha "não consegui gravar $MANAGED com o conteúdo certo"; $faltou = $true }
     if ($faltou) { Write-Host "  O registro da janela de administrador está em $env:PUBLIC\nevoni-one-instalacao.log. Mande para a one@."; return }
   }
 
@@ -237,7 +237,9 @@ function Tentar($rotulo, [scriptblock]$acao) {
   else {
     npm install -g "pnpm@$PNPM_VERSAO" --no-fund --no-audit --loglevel=error
     Atualizar-Path
-    Ok "pnpm $PNPM_VERSAO instalado (a 12.x é bloqueada pelo Smart App Control)"
+    $v = if (Existe "pnpm") { "$(pnpm --version 2>$null)".Trim() } else { "" }
+    if ($v -eq $PNPM_VERSAO) { Ok "pnpm $PNPM_VERSAO instalado (a 12.x é bloqueada pelo Smart App Control)" }
+    else { Falha "não consegui instalar o pnpm $PNPM_VERSAO (está '$v'). Rode o script de novo."; return }
   }
   pnpm config set update-notifier false 2>$null
   Ok "avisos de atualização do npm e do pnpm desligados (ninguém atualiza por engano)"
@@ -264,8 +266,12 @@ function Tentar($rotulo, [scriptblock]$acao) {
   if ((gh auth status 2>&1 | Out-String) -notmatch "read:packages") {
     Write-Host "  falta a permissão de ler os pacotes; o navegador vai abrir de novo para autorizar."
     gh auth refresh --hostname github.com --scopes read:packages
+    if ((gh auth status 2>&1 | Out-String) -notmatch "read:packages") { Falha "o token continua sem permissão de ler os pacotes. Rode o script de novo."; return }
   }
   gh auth setup-git
+  if ("$(git config --global --get-all credential.https://github.com.helper 2>$null)" -notmatch "auth git-credential") {
+    Falha "não consegui ligar o Git ao login do GitHub CLI (gh auth setup-git). Rode o script de novo."; return
+  }
   Ok "GitHub logado como $conta, e o Git usa esse login (sem a janela de escolher conta)"
 
   Etapa "4. Identificação nos envios"

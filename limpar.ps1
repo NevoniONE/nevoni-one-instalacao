@@ -20,7 +20,9 @@ function Limpar-NevoniONE {
   function Etapa($texto) { Write-Host ""; Write-Host "== $texto ==" -ForegroundColor Cyan }
   function Ok($texto) { Write-Host "  ok     $texto" -ForegroundColor Green }
   function Aviso($texto) { Write-Host "  AVISO  $texto" -ForegroundColor Yellow }
-  function Falha($texto) { Write-Host "  FALHA  $texto" -ForegroundColor Red }
+  # Conta as falhas, para a mensagem final não dizer "concluída" quando algo falhou.
+  $estado = @{ falhas = 0 }
+  function Falha($texto) { $estado.falhas++; Write-Host "  FALHA  $texto" -ForegroundColor Red }
   function Existe($comando) { [bool](Get-Command $comando -ErrorAction SilentlyContinue) }
   function Atualizar-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
@@ -147,13 +149,19 @@ function Tentar($rotulo, [scriptblock]$acao) {
       Ok "saiu da conta $login"
     }
   }
-  $alvos = @(cmdkey /list | Select-String -Pattern "(LegacyGeneric:target=)?(git:https://[^\s]*github\.com[^\s]*)" -AllMatches |
+  # Contas guardadas no cofre do Windows: as do Git (git:https://...github.com) e as do próprio
+  # GitHub CLI (gh:github.com...), que ficam mesmo quando o logout acima não acontece (sem rede).
+  $alvos = @(cmdkey /list | Select-String -Pattern "(LegacyGeneric:target=)?(git:https://[^\s]*github\.com[^\s]*|gh:github\.com[^\s]*)" -AllMatches |
     ForEach-Object { $_.Matches } | ForEach-Object { $_.Value } | Sort-Object -Unique)
-  foreach ($alvo in $alvos) { cmdkey "/delete:$alvo" | Out-Null; Ok "conta guardada no Windows removida ($alvo)" }
+  foreach ($alvo in $alvos) {
+    cmdkey "/delete:$alvo" | Out-Null
+    if ($LASTEXITCODE -eq 0) { Ok "conta guardada no Windows removida ($alvo)" } else { Falha "não consegui remover a conta guardada $alvo" }
+  }
   [Environment]::SetEnvironmentVariable("NODE_AUTH_TOKEN", $null, "User")
   $env:NODE_AUTH_TOKEN = $null
   Remove-Item -Recurse -Force (Join-Path $env:APPDATA "GitHub CLI") -ErrorAction SilentlyContinue
-  Ok "sem login do GitHub e sem token dos pacotes"
+  if ((Existe "gh") -and "$(gh api user -q .login 2>$null)".Trim()) { Falha "o GitHub CLI ainda está logado" }
+  else { Ok "sem login do GitHub e sem token dos pacotes" }
 
   Etapa "3. Configurações do Git"
   if (Existe "git") {
@@ -204,8 +212,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
   $desinstalar = @($PROGRAMAS | Where-Object { Existe $_.Comando })
   if ($removerProtecao) {
     Write-Host "  vai remover: proteção do Claude Desktop"
-    $comandos += "Remove-Item -Force '$MANAGED'"
-    $comandos += "if (-not (Get-ChildItem 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue)) { Remove-Item -Force 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue }"
+    $comandos += "Tentar 'proteção do Claude Desktop' { Remove-Item -Force '$MANAGED'; if (-not (Get-ChildItem 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue)) { Remove-Item -Force 'C:\Program Files\ClaudeCode' -ErrorAction SilentlyContinue } }"
   } else { Ok "proteção do Claude Desktop já não existia" }
   foreach ($p in $PROGRAMAS) {
     if (Existe $p.Comando) {
@@ -214,20 +221,21 @@ function Tentar($rotulo, [scriptblock]$acao) {
     } else { Ok "$($p.Nome) já não está instalado" }
   }
   if ($comandos.Count -gt 0) {
-    if (Como-Administrador $comandos) {
-      Atualizar-Path
-      if ($removerProtecao) {
-        if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "proteção do Claude Desktop removida" }
-      }
-      foreach ($p in $desinstalar) {
-        if (Existe $p.Comando) { Falha "o $($p.Nome) continua instalado (registro em $env:PUBLIC\nevoni-one-instalacao.log)" }
-        else { Ok "$($p.Nome) desinstalado" }
-      }
+    # Mesmo se a senha não for informada, confere e diz o que ficou para trás.
+    [void](Como-Administrador $comandos)
+    Atualizar-Path
+    if ($removerProtecao) {
+      if (Test-Path $MANAGED) { Falha "não consegui remover $MANAGED" } else { Ok "proteção do Claude Desktop removida" }
+    }
+    foreach ($p in $desinstalar) {
+      if (Existe $p.Comando) { Falha "o $($p.Nome) continua instalado (registro em $env:PUBLIC\nevoni-one-instalacao.log)" }
+      else { Ok "$($p.Nome) desinstalado" }
     }
   }
 
   Write-Host ""
-  Write-Host "LIMPEZA CONCLUÍDA. Confira os itens com FALHA acima, se houver." -ForegroundColor Green
+  if ($estado.falhas -eq 0) { Write-Host "LIMPEZA CONCLUÍDA." -ForegroundColor Green }
+  else { Write-Host "LIMPEZA INCOMPLETA: $($estado.falhas) item(ns) com FALHA acima. Rode de novo; se continuar, mande o print para a one@." -ForegroundColor Red }
   Write-Host "No Claude Desktop, a pasta do módulo some da lista ao ser aberta; se a máquina deixar de ser do usuário, saia da conta dele no app."
 }
 
