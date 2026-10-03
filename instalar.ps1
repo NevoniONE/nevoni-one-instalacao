@@ -134,7 +134,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
 
     $conta = Conta-GitHub
     if (-not $conta) { Falha "GitHub CLI sem login"; $falhas++ }
-    elseif ($conta -eq $ORG) { Falha "o GitHub está logado com a conta guardiã ($ORG). Use a conta do usuário"; $falhas++ }
+    elseif ($conta -eq $ORG) { Falha "o GitHub está logado com a conta da TI ($ORG). Use a conta do usuário"; $falhas++ }
     else {
       Ok "GitHub logado como $conta"
       $status = (gh auth status 2>&1 | Out-String)
@@ -249,7 +249,7 @@ function Tentar($rotulo, [scriptblock]$acao) {
   Etapa "3. Login do GitHub (com o usuário presente)"
   $conta = Conta-GitHub
   if ($conta -eq $ORG) {
-    Falha "o GitHub está logado com a conta guardiã ($ORG). Ela nunca é usada na máquina do usuário. Saindo dela..."
+    Falha "o GitHub está logado com a conta da TI ($ORG). Ela nunca é usada na máquina do usuário. Saindo dela..."
     gh auth logout --hostname github.com --user $ORG
     $conta = ""
   }
