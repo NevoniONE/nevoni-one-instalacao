@@ -175,6 +175,8 @@ if (-not $wg) {
     Atualizar-Path
     Ok "pasta do npm no caminho do usuário"
   }
+  # O aviso do npm é desligado antes de usar o npm, para não aparecer já na instalação.
+  npm config set update-notifier false 2>$null
   $v = if (Existe "pnpm") { "$(pnpm --version 2>$null)".Trim() } else { "" }
   if ($v -eq $PNPM_VERSAO) { Ok "pnpm $PNPM_VERSAO já instalado" }
   else {
@@ -182,7 +184,6 @@ if (-not $wg) {
     Atualizar-Path
     Ok "pnpm $PNPM_VERSAO instalado (a 12.x é bloqueada pelo Smart App Control)"
   }
-  npm config set update-notifier false 2>$null
   pnpm config set update-notifier false 2>$null
   Ok "avisos de atualização do npm e do pnpm desligados (ninguém atualiza por engano)"
 
