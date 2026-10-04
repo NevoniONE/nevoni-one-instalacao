@@ -85,19 +85,6 @@ function Instalar-Node {
 function Instalar-GhCli {
   Rodar-Msi (Instalador-GitHub "cli/cli" '^gh_[\d.]+_windows_amd64\.msi$') "/i"
 }
-function Desinstalar($padrao) {
-  $chaves = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
-  $itens = Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $padrao }
-  foreach ($i in $itens) {
-    Write-Host "desinstalando $($i.DisplayName)"
-    if ($i.WindowsInstaller -eq 1) {
-      $p = Start-Process msiexec.exe -ArgumentList "/x", $i.PSChildName, "/qn", "/norestart" -Wait -PassThru
-    } else {
-      $p = Start-Process $i.UninstallString.Trim('"') -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES" -Wait -PassThru
-    }
-    Write-Host "  código de saída: $($p.ExitCode)"
-  }
-}
 function Tentar($rotulo, [scriptblock]$acao) {
   try { & $acao; Write-Host "OK: $rotulo" } catch { Write-Host "ERRO em ${rotulo}: $($_.Exception.Message)" }
 }
@@ -197,7 +184,8 @@ function Tentar($rotulo, [scriptblock]$acao) {
         foreach ($r in $repos) { Write-Host "       $(Join-Path $PASTA $r)" }
         Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
         Write-Host "  4. Se perguntar onde abrir os links: 'Abrir no Google Chrome'."
-        Write-Host "  5. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
+        Write-Host "  5. Oriente o usuário a não usar o botão 'Criar PR': o envio para aprovação é pedido ao Claude."
+        Write-Host "  6. Conversa nova: o usuário digita 'Bom dia!' e confere o passo 5 do roteiro."
       }
     } else {
       Write-Host "A MÁQUINA AINDA NÃO ESTÁ PRONTA: $falhas item(ns) com FALHA acima." -ForegroundColor Red

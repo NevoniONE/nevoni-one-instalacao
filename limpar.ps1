@@ -34,51 +34,11 @@ function Limpar-NevoniONE {
     Remove-Item $log -ErrorAction SilentlyContinue
     # Funções da janela de administrador. Sem winget: numa janela elevada por outra conta (a
     # administradora), o Windows nega a execução do winget, que é um app da Loja por usuário
-    # (achado da simulação T1). Os instaladores vêm direto das fontes oficiais, com o hash
-    # SHA-256 conferido; a desinstalação usa o registro do Windows ("Adicionar ou remover programas").
+    # (achado da simulação T1). A desinstalação usa o registro do Windows ("Adicionar ou remover
+    # programas").
     $funcoesAdmin = @'
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$pastaTemp = Join-Path $env:TEMP "nevoni-one-instalacao"
-New-Item -ItemType Directory -Force $pastaTemp | Out-Null
-function Baixar($url, $nome, $sha256) {
-  $destino = Join-Path $pastaTemp $nome
-  Write-Host "baixando $url"
-  Invoke-WebRequest -Uri $url -OutFile $destino -UseBasicParsing
-  if (-not $sha256) { throw "sem hash para conferir $nome" }
-  if ((Get-FileHash $destino -Algorithm SHA256).Hash.ToLower() -ne $sha256.ToLower()) { throw "o hash de $nome não confere" }
-  Write-Host "hash conferido: $nome"
-  return $destino
-}
-function Instalador-GitHub($repo, $padrao) {
-  $versao = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing -Headers @{ "User-Agent" = "nevoni-one-instalacao" }
-  $item = $versao.assets | Where-Object { $_.name -match $padrao } | Select-Object -First 1
-  if (-not $item) { throw "não achei o instalador em $repo" }
-  $sha = if ("$($item.digest)" -like "sha256:*") { "$($item.digest)".Substring(7) } else { $null }
-  return Baixar $item.browser_download_url $item.name $sha
-}
-function Rodar-Msi($arquivo, $acao) {
-  $p = Start-Process msiexec.exe -ArgumentList $acao, "`"$arquivo`"", "/qn", "/norestart" -Wait -PassThru
-  if ($p.ExitCode -notin 0, 3010) { throw "msiexec terminou com código $($p.ExitCode)" }
-}
-function Instalar-Git {
-  $f = Instalador-GitHub "git-for-windows/git" '^Git-[\d.]+-64-bit\.exe$'
-  $p = Start-Process $f -ArgumentList "/VERYSILENT", "/NORESTART", "/SP-", "/SUPPRESSMSGBOXES" -Wait -PassThru
-  if ($p.ExitCode -ne 0) { throw "instalador do Git terminou com código $($p.ExitCode)" }
-}
-function Instalar-Node {
-  # No PowerShell 5.1, a lista vinda do Invoke-RestMethod só é percorrida item a item depois de guardada numa variável.
-  $lista = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing
-  $versao = ($lista | Where-Object { $_.lts } | Select-Object -First 1).version
-  $nome = "node-$versao-x64.msi"
-  $somas = (Invoke-WebRequest -Uri "https://nodejs.org/dist/$versao/SHASUMS256.txt" -UseBasicParsing).Content
-  $sha = ($somas -split "`n" | Where-Object { $_.Trim().EndsWith($nome) } | Select-Object -First 1) -split "\s+" | Select-Object -First 1
-  Rodar-Msi (Baixar "https://nodejs.org/dist/$versao/$nome" $nome $sha) "/i"
-}
-function Instalar-GhCli {
-  Rodar-Msi (Instalador-GitHub "cli/cli" '^gh_[\d.]+_windows_amd64\.msi$') "/i"
-}
 function Desinstalar($padrao) {
   $chaves = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
   $itens = Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $padrao }
@@ -253,6 +213,10 @@ function Tentar($rotulo, [scriptblock]$acao) {
   }
   $sobrou = @($dados | Where-Object { Test-Path $_ })
   if ($sobrou.Count -eq 0) { Ok "dados do Claude nesta conta removidos" } else { Falha "não consegui apagar: $($sobrou -join ', ')" }
+
+  # Sobras da instalação: a pasta temporária e, se tudo deu certo, o registro da janela de administrador.
+  Remove-Item -Recurse -Force (Join-Path $env:TEMP "nevoni-one-instalacao") -ErrorAction SilentlyContinue
+  if ($estado.falhas -eq 0) { Remove-Item -Force (Join-Path $env:PUBLIC "nevoni-one-instalacao.log") -ErrorAction SilentlyContinue }
 
   Write-Host ""
   if ($estado.falhas -eq 0) { Write-Host "LIMPEZA CONCLUÍDA." -ForegroundColor Green }
