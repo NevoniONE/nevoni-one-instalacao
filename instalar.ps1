@@ -318,7 +318,9 @@ function Tentar($rotulo, [scriptblock]$acao) {
       Ok "$r copiado"
     }
     Push-Location $caminho
-    pnpm install --reporter=silent
+    # Sem pergunta escondida: uma instalação anterior pela metade fazia o pnpm perguntar se podia
+    # apagar e refazer as bibliotecas, e no modo silencioso o script ficava parado (05/10/2026).
+    pnpm install --reporter=silent --config.confirmModulesPurge=false
     $instalou = ($LASTEXITCODE -eq 0)
     Pop-Location
     if ($instalou) { Ok "$r com os pacotes instalados" } else { Falha "pnpm install falhou em $r (erro 401/403: falta liberar a leitura dos pacotes para a conta $conta)" }
