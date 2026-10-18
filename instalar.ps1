@@ -171,16 +171,20 @@ function Tentar($rotulo, [scriptblock]$acao) {
           Read-Host "  O Claude Desktop está aberto. Feche-o por completo (ícone perto do relógio, botão direito, Sair) e pressione Enter"
           Start-Sleep -Seconds 3
         }
-        $primeiro = Join-Path $PASTA $repos[0]
-        try { Set-Clipboard -Value $primeiro } catch { }
+        # Copia só até a pasta dos módulos, com a barra no fim: colado na janela de escolher pasta,
+        # o caminho completo de um módulo chegava cortado na última barra (a janela trata o que vem
+        # depois dela como um nome a selecionar). Com a pasta dos módulos, aparecem as de todos os
+        # módulos da pessoa, que não são escondidas, e ela clica na que quer (Fred, 14/10/2026).
+        try { Set-Clipboard -Value ($PASTA + "\") } catch { }
         $pacote = Claude-Pacote
         Start-Process "shell:AppsFolder\$($pacote.PackageFamilyName)!Claude"
         Write-Host ""
         Write-Host "O Claude Desktop foi aberto. Com o usuário presente:"
         Write-Host "  1. Entrar com a conta @nevoni.com.br do usuário."
-        Write-Host "  2. Aba Code, botão de escolher pasta (ao lado de 'Local'), colar na barra de endereço (Ctrl+V)"
-        Write-Host "     o caminho do módulo, que já está copiado, e clicar em 'Selecionar pasta'."
-        Write-Host "     Se o Ctrl+V não colar o caminho (por exemplo, porque outra coisa foi copiada depois), copie-o daqui:"
+        Write-Host "  2. Aba Code, botão de escolher pasta (ao lado de 'Local'). Na barra de endereço, colar (Ctrl+V)"
+        Write-Host "     o caminho da pasta dos módulos, que já está copiado, e apertar Enter. Clicar UMA vez na pasta"
+        Write-Host "     do módulo e só então em 'Selecionar pasta'. Se o Ctrl+V não colar, digite %LOCALAPPDATA%\NevoniONE\"
+        Write-Host "     Pastas dos módulos deste usuário:"
         foreach ($r in $repos) { Write-Host "       $(Join-Path $PASTA $r)" }
         Write-Host "  3. 'Confiar no workspace', modo 'Aceitar edições' e a caixa 'worktree' desmarcada."
         Write-Host "  4. Se perguntar onde abrir os links: 'Abrir no Google Chrome'."
@@ -307,6 +311,20 @@ function Tentar($rotulo, [scriptblock]$acao) {
 
   Etapa "6. Módulos do usuário"
   New-Item -ItemType Directory -Force $PASTA | Out-Null
+  # Proteção: se a pessoa selecionar a pasta dos módulos em vez da de um módulo, o Claude avisa
+  # logo na primeira conversa, em vez de trabalhar fora do módulo.
+  $aviso = @(
+    "# Esta não é a pasta de um módulo",
+    "",
+    "Esta é a pasta que guarda os módulos do Nevoni ONE desta pessoa. Não trabalhe aqui: não crie,",
+    "não altere e não apague nada nesta pasta.",
+    "",
+    "Na primeira resposta, em português, diga ao usuário que a pasta escolhida no Claude Desktop",
+    "está errada: ele deve clicar de novo no botão de escolher pasta (ao lado de 'Local'), entrar",
+    "nesta pasta e clicar UMA vez na pasta do módulo (as que começam com nevoni-one-modulo-) antes de",
+    "'Selecionar pasta'. Liste as pastas de módulo que existem aqui e não faça mais nada."
+  ) -join "`r`n"
+  try { [IO.File]::WriteAllText((Join-Path $PASTA "CLAUDE.md"), $aviso, (New-Object Text.UTF8Encoding($false))) } catch { Aviso "não consegui gravar o aviso da pasta dos módulos" }
   $repos = Repositorios
   if ($repos.Count -eq 0) { Falha "a conta $conta não tem acesso a nenhum repositório de módulo. Confira o convite (passo 2 do roteiro)."; return }
   foreach ($r in $repos) {
