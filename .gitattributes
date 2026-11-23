@@ -1,0 +1,2 @@
+# Os scripts do Mac precisam das quebras de linha do Mac (LF), mesmo editados no Windows.
+*.sh text eol=lf
