@@ -20,7 +20,7 @@ AGENTE="$HOME/Library/LaunchAgents/$AGENTE_ID.plist"
 LOG="/Users/Shared/nevoni-one-instalacao.log"
 BLOCO_INICIO="# >>> Nevoni ONE (instalar.sh) >>>"
 BLOCO_FIM="# <<< Nevoni ONE <<<"
-ARQUIVOS_SHELL="$HOME/.zprofile $HOME/.zshrc"
+ARQUIVOS_SHELL="$HOME/.zprofile $HOME/.zshrc $HOME/.bashrc $HOME/.bash_profile $HOME/.bash_login $HOME/.profile"
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 FALHAS=0

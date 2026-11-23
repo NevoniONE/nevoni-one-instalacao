@@ -23,13 +23,31 @@ MANAGED_DIR="/Library/Application Support/ClaudeCode"
 MANAGED="$MANAGED_DIR/managed-settings.json"
 MANAGED_CONTEUDO='{ "disableAutoMode": "disable", "permissions": { "disableBypassPermissionsMode": "disable" } }'
 CLAUDE_APP="/Applications/Claude.app"
+# Claude Desktop já instalado só para esta conta (arrastado para a pasta Aplicativos do usuário).
+if [ ! -d "$CLAUDE_APP" ] && [ -d "$HOME/Applications/Claude.app" ]; then CLAUDE_APP="$HOME/Applications/Claude.app"; fi
 CLAUDE_ASSINATURA="Developer ID Application: Anthropic, PBC ("
 AGENTE_ID="br.com.nevoni.one.token"
 AGENTE="$HOME/Library/LaunchAgents/$AGENTE_ID.plist"
 LOG="/Users/Shared/nevoni-one-instalacao.log"
 BLOCO_INICIO="# >>> Nevoni ONE (instalar.sh) >>>"
 BLOCO_FIM="# <<< Nevoni ONE <<<"
-ARQUIVOS_SHELL="$HOME/.zprofile $HOME/.zshrc"
+# Arquivos que o Terminal (e a aba Code do Claude) leem ao abrir: os do zsh, padrão do macOS, e os
+# do bash quando a conta ainda usa o bash (contas antigas; achado no Mac do Victor, 23/11/2026).
+# No bash, o arquivo de login é o primeiro que existir (o bash só lê um); sem nenhum, o .bash_profile.
+arquivos_shell() {
+  local f
+  echo "$HOME/.zprofile"
+  echo "$HOME/.zshrc"
+  case "$SHELL" in
+    */bash)
+      echo "$HOME/.bashrc"
+      for f in .bash_profile .bash_login .profile; do
+        if [ -f "$HOME/$f" ]; then echo "$HOME/$f"; return 0; fi
+      done
+      echo "$HOME/.bash_profile"
+      ;;
+  esac
+}
 
 # /usr/local/bin primeiro: é onde os instaladores oficiais do Node e do GitHub CLI colocam os comandos.
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -192,7 +210,9 @@ FUNCOES
 conferir() {
   local guiar="$1" falhas=0 c v conta status helper email nome repos r caminho arq
   etapa "Conferência final"
-  if claude_assinado; then ok "Claude Desktop instalado (assinatura da Anthropic)"; else falha "Claude Desktop não está instalado em $CLAUDE_APP"; falhas=$((falhas + 1)); fi
+  if claude_assinado; then ok "Claude Desktop instalado em $CLAUDE_APP (assinatura da Anthropic)"
+  elif [ -d "$CLAUDE_APP" ]; then falha "o Claude Desktop em $CLAUDE_APP não passou na conferência da assinatura da Anthropic"; falhas=$((falhas + 1))
+  else falha "Claude Desktop não está instalado em $CLAUDE_APP"; falhas=$((falhas + 1)); fi
   for c in $PROG_COMANDOS; do
     if tem_programa "$c"; then ok "$(nome_programa "$c") instalado"; else falha "$(nome_programa "$c") não está instalado"; falhas=$((falhas + 1)); fi
   done
@@ -224,9 +244,9 @@ conferir() {
     falha "sem o Git, as configurações do Git não foram conferidas"; falhas=$((falhas + 1))
   fi
 
-  # O token dos pacotes chega por dois caminhos: o Terminal (bloco no .zprofile e no .zshrc, que lê o
+  # O token dos pacotes chega por dois caminhos: o Terminal (bloco nos arquivos do zsh e do bash, que lê o
   # token do login do gh na hora) e os aplicativos abertos pelo Dock (agente de login).
-  for arq in $ARQUIVOS_SHELL; do
+  for arq in $(arquivos_shell); do
     if bloco_no_shell "$arq"; then ok "token dos pacotes no Terminal ($arq)"; else falha "falta o bloco do Nevoni ONE em $arq"; falhas=$((falhas + 1)); fi
   done
   if [ -f "$AGENTE" ] && [ -n "$(launchctl getenv NODE_AUTH_TOKEN 2>/dev/null)" ]; then ok "token dos pacotes para os aplicativos (agente de login)"
@@ -320,8 +340,14 @@ instalar_nevoni_one() {
   fi
   if claude_assinado; then ok "Claude Desktop já instalado"
   else
-    echo "  vai instalar: Claude Desktop"
+    if [ -d "$CLAUDE_APP" ]; then echo "  vai reinstalar: Claude Desktop (o atual não passou na conferência da assinatura)"
+    else echo "  vai instalar: Claude Desktop"; fi
     comandos+=("tentar 'Claude Desktop' instalar_claude")
+    # O aplicativo não pode ser trocado com ele aberto.
+    while pgrep -x Claude >/dev/null 2>&1; do
+      perguntar "O Claude Desktop está aberto. Feche-o por completo (no menu Claude, Sair, ou Cmd+Q) e pressione Enter" >/dev/null
+      sleep 3
+    done
   fi
   if [ "${#comandos[@]}" -gt 0 ]; then
     como_administrador "${comandos[@]}" || return 1
@@ -349,10 +375,6 @@ instalar_nevoni_one() {
   fi
   pnpm config set update-notifier false >/dev/null 2>&1
   ok "avisos de atualização do npm e do pnpm desligados (ninguém atualiza por engano)"
-  case "$SHELL" in
-    */zsh) ;;
-    *) aviso "o Terminal deste usuário não usa o zsh ($SHELL). O token dos pacotes só é ligado no zsh" ;;
-  esac
 
   etapa "3. Login do GitHub (com o usuário presente)"
   conta="$(conta_github)"
@@ -402,9 +424,9 @@ instalar_nevoni_one() {
 
   etapa "5. Token de leitura dos pacotes da empresa"
   # O token não fica escrito em arquivo nenhum: é lido na hora do login do gh, que o guarda nas
-  # Chaves do macOS. Terminal: bloco no .zprofile e no .zshrc. Aplicativos abertos pelo Dock (o
+  # Chaves do macOS. Terminal: bloco nos arquivos do zsh (e do bash, se a conta usa o bash). Aplicativos abertos pelo Dock (o
   # Claude Desktop): um agente de login que repassa o token ao abrir a sessão do Mac.
-  for arq in $ARQUIVOS_SHELL; do
+  for arq in $(arquivos_shell); do
     if bloco_no_shell "$arq"; then ok "bloco já presente em $arq"
     else
       {
