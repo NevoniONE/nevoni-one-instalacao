@@ -25,7 +25,9 @@ MANAGED_CONTEUDO='{ "disableAutoMode": "disable", "permissions": { "disableBypas
 CLAUDE_APP="/Applications/Claude.app"
 # Claude Desktop já instalado só para esta conta (arrastado para a pasta Aplicativos do usuário).
 if [ ! -d "$CLAUDE_APP" ] && [ -d "$HOME/Applications/Claude.app" ]; then CLAUDE_APP="$HOME/Applications/Claude.app"; fi
-CLAUDE_ASSINATURA="Developer ID Application: Anthropic, PBC ("
+# Código da Anthropic na Apple (Team ID), conferido no Claude Desktop do Mac do Victor em 23/11/2026
+# ("Developer ID Application: Anthropic PBC (Q6L2SF6YDW)"). O código não depende da grafia do nome.
+CLAUDE_EQUIPE="Q6L2SF6YDW"
 AGENTE_ID="br.com.nevoni.one.token"
 AGENTE="$HOME/Library/LaunchAgents/$AGENTE_ID.plist"
 LOG="/Users/Shared/nevoni-one-instalacao.log"
@@ -94,7 +96,7 @@ protecao_gravada() { [ -f "$MANAGED" ] && [ "$(cat "$MANAGED" 2>/dev/null)" = "$
 claude_assinado() {
   [ -d "$CLAUDE_APP" ] || return 1
   codesign --verify --deep --strict "$CLAUDE_APP" >/dev/null 2>&1 || return 1
-  codesign -dvv "$CLAUDE_APP" 2>&1 | grep -q "^Authority=$CLAUDE_ASSINATURA"
+  codesign -dvv "$CLAUDE_APP" 2>&1 | grep -qx "TeamIdentifier=$CLAUDE_EQUIPE"
 }
 usuario_eh_administrador() { id -Gn | tr ' ' '\n' | grep -qx admin; }
 conta_github() {
@@ -113,13 +115,14 @@ como_administrador() {
   local script
   script="$(mktemp /tmp/nevoni-one-instalacao.XXXXXX)" || { falha "não consegui criar o arquivo temporário"; return 1; }
   {
-    printf 'MANAGED_DIR=%q\nMANAGED=%q\nMANAGED_CONTEUDO=%q\nPNPM_VERSAO=%q\nCLAUDE_APP=%q\nCLAUDE_ASSINATURA=%q\n' \
-      "$MANAGED_DIR" "$MANAGED" "$MANAGED_CONTEUDO" "$PNPM_VERSAO" "$CLAUDE_APP" "$CLAUDE_ASSINATURA"
+    printf 'MANAGED_DIR=%q\nMANAGED=%q\nMANAGED_CONTEUDO=%q\nPNPM_VERSAO=%q\nCLAUDE_APP=%q\nCLAUDE_EQUIPE=%q\n' \
+      "$MANAGED_DIR" "$MANAGED" "$MANAGED_CONTEUDO" "$PNPM_VERSAO" "$CLAUDE_APP" "$CLAUDE_EQUIPE"
     cat <<'FUNCOES'
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # A pasta pessoal do administrador: sem isso, o npm rodando como administrador gravaria arquivos
 # dele na pasta do usuário, e o npm do usuário daria erro de permissão depois.
 export HOME=/var/root
+export npm_config_update_notifier=false
 TEMP_DIR="$(mktemp -d /tmp/nevoni-one-instalacao-arquivos.XXXXXX)"
 trap 'hdiutil detach "$TEMP_DIR/montagem" -quiet >/dev/null 2>&1; rm -rf "$TEMP_DIR"' EXIT
 echo "início: $(date)"
@@ -170,16 +173,18 @@ gravar_protecao() {
   mkdir -p "$MANAGED_DIR" && printf '%s' "$MANAGED_CONTEUDO" > "$MANAGED" && chown root:wheel "$MANAGED" && chmod 644 "$MANAGED"
 }
 # Claude Desktop: imagem .dmg oficial da Anthropic (a mesma para chip Apple e Intel). Sem hash
-# publicado: confere a assinatura digital (Anthropic, PBC) e a aprovação da Apple (Gatekeeper).
+# publicado: confere a assinatura digital (Anthropic PBC, Q6L2SF6YDW) e a aprovação da Apple (Gatekeeper).
 instalar_claude() {
   local dmg="$TEMP_DIR/Claude.dmg" app
   echo "baixando o Claude Desktop (cerca de 300 MB)"
-  curl -fsSL --retry 3 -o "$dmg" "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect" || return 1
+  # O endereço de download do claude.ai recusa (403) a identificação padrão do curl, mas aceita a de
+  # navegador, a mesma família que o PowerShell do Windows usa (achado no Mac do Victor, 23/11/2026).
+  curl -fsSL --retry 3 -A "Mozilla/5.0 (Macintosh) nevoni-one-instalacao" -o "$dmg" "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect" || return 1
   hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$TEMP_DIR/montagem" -quiet || return 1
   app="$(find "$TEMP_DIR/montagem" -maxdepth 1 -name '*.app' | head -n 1)"
   [ -n "$app" ] || { echo "não achei o aplicativo dentro da imagem do Claude Desktop"; return 1; }
   codesign --verify --deep --strict "$app" || { echo "a assinatura do Claude Desktop não confere"; return 1; }
-  codesign -dvv "$app" 2>&1 | grep -q "^Authority=$CLAUDE_ASSINATURA" || { echo "o Claude Desktop não está assinado pela Anthropic"; return 1; }
+  codesign -dvv "$app" 2>&1 | grep -qx "TeamIdentifier=$CLAUDE_EQUIPE" || { echo "o Claude Desktop não está assinado pela Anthropic"; return 1; }
   spctl --assess --type execute "$app" || { echo "o Gatekeeper não aprovou o Claude Desktop"; return 1; }
   echo "assinatura da Anthropic conferida"
   rm -rf "$CLAUDE_APP" && ditto "$app" "$CLAUDE_APP"
